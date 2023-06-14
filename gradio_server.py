@@ -17,9 +17,9 @@ import re
 
 _CACHE = {}
 
-
 # Build the semantic search model
 embedder = SentenceTransformer('multi-qa-mpnet-base-cos-v1')
+
 
 def init_prompt(novel_type, description):
     if description == "":
@@ -49,20 +49,29 @@ Make sure to be precise and follow the output format strictly.
 
 """
 
+
 def init(novel_type, description, request: gr.Request):
     if novel_type == "":
         novel_type = "Science Fiction"
     global _CACHE
-    cookie = request.headers['cookie']
-    cookie = cookie.split('; _gat_gtag')[0]
+    if 'cookie' in request.headers:
+        cookie = request.headers['cookie']
+        cookie = cookie.split('; _gat_gtag')[0]
+    else:
+        cookie = "; _gat_gtag"
+        cookie = cookie.split('; _gat_gtag')[0]
+
     # prepare first init
-    init_paragraphs = get_init(text=init_prompt(novel_type,description))
+    print(request.headers)
+    print(init_prompt(novel_type, description))
+    init_paragraphs = get_init(text=init_prompt(novel_type, description))
     # print(init_paragraphs)
     start_input_to_human = {
         'output_paragraph': init_paragraphs['Paragraph 3'],
         'input_paragraph': '\n\n'.join([init_paragraphs['Paragraph 1'], init_paragraphs['Paragraph 2']]),
         'output_memory': init_paragraphs['Summary'],
-        "output_instruction": [init_paragraphs['Instruction 1'], init_paragraphs['Instruction 2'], init_paragraphs['Instruction 3']]
+        "output_instruction": [init_paragraphs['Instruction 1'], init_paragraphs['Instruction 2'],
+                               init_paragraphs['Instruction 3']]
     }
 
     _CACHE[cookie] = {"start_input_to_human": start_input_to_human,
@@ -76,14 +85,16 @@ Paragraphs:
 {start_input_to_human['input_paragraph']}"""
     long_memory = parse_instructions([init_paragraphs['Paragraph 1'], init_paragraphs['Paragraph 2']])
     # short memory, long memory, current written paragraphs, 3 next instructions
-    return start_input_to_human['output_memory'], long_memory, written_paras, init_paragraphs['Instruction 1'], init_paragraphs['Instruction 2'], init_paragraphs['Instruction 3']
+    return start_input_to_human['output_memory'], long_memory, written_paras, init_paragraphs['Instruction 1'], \
+           init_paragraphs['Instruction 2'], init_paragraphs['Instruction 3']
+
 
 def step(short_memory, long_memory, instruction1, instruction2, instruction3, current_paras, request: gr.Request, ):
     if current_paras == "":
         return "", "", "", "", "", ""
     global _CACHE
-    # print(list(_CACHE.keys()))
-    # print(request.headers.get('cookie'))
+    print(list(_CACHE.keys()))
+    print(request.headers.get('cookie'))
     cookie = request.headers['cookie']
     cookie = cookie.split('; _gat_gtag')[0]
     cache = _CACHE[cookie]
@@ -110,8 +121,8 @@ def step(short_memory, long_memory, instruction1, instruction2, instruction3, cu
         writer = cache["writer"]
         output = writer.output
         output['output_memory'] = short_memory
-        #randomly select one instruction out of three
-        instruction_index = random.randint(0,2)
+        # randomly select one instruction out of three
+        instruction_index = random.randint(0, 2)
         output['output_instruction'] = [instruction1, instruction2, instruction3][instruction_index]
         human.input = output
         human.step()
@@ -120,15 +131,16 @@ def step(short_memory, long_memory, instruction1, instruction2, instruction3, cu
 
     long_memory = [[v] for v in writer.long_memory]
     # short memory, long memory, current written paragraphs, 3 next instructions
-    return writer.output['output_memory'], long_memory, current_paras + '\n\n' + writer.output['input_paragraph'], human.output['output_instruction'], *writer.output['output_instruction']
+    return writer.output['output_memory'], long_memory, current_paras + '\n\n' + writer.output['input_paragraph'], \
+           human.output['output_instruction'], *writer.output['output_instruction']
 
 
 def controled_step(short_memory, long_memory, selected_instruction, current_paras, request: gr.Request, ):
     if current_paras == "":
         return "", "", "", "", "", ""
     global _CACHE
-    # print(list(_CACHE.keys()))
-    # print(request.headers.get('cookie'))
+    print(list(_CACHE.keys()))
+    print(request.headers.get('cookie'))
     cookie = request.headers['cookie']
     cookie = cookie.split('; _gat_gtag')[0]
     cache = _CACHE[cookie]
@@ -160,13 +172,14 @@ def controled_step(short_memory, long_memory, selected_instruction, current_para
         writer.step()
 
     # short memory, long memory, current written paragraphs, 3 next instructions
-    return writer.output['output_memory'], parse_instructions(writer.long_memory), current_paras + '\n\n' + writer.output['input_paragraph'], *writer.output['output_instruction']
+    return writer.output['output_memory'], parse_instructions(writer.long_memory), current_paras + '\n\n' + \
+           writer.output['input_paragraph'], *writer.output['output_instruction']
 
 
 # SelectData is a subclass of EventData
 def on_select(instruction1, instruction2, instruction3, evt: gr.SelectData):
     selected_plan = int(evt.value.replace("Instruction ", ""))
-    selected_plan = [instruction1, instruction2, instruction3][selected_plan-1]
+    selected_plan = [instruction1, instruction2, instruction3][selected_plan - 1]
     return selected_plan
 
 
@@ -174,22 +187,22 @@ with gr.Blocks(title="RecurrentGPT", css="footer {visibility: hidden}", theme="d
     gr.Markdown(
         """
     # RecurrentGPT
-    Interactive Generation of (Arbitrarily) Long Texts with Human-in-the-Loop
+    使用 Human-in-the-Loop 交互式生成（任意）长文本
     """)
-    with gr.Tab("Auto-Generation"):
+    with gr.Tab("自动生成"):
         with gr.Row():
             with gr.Column():
                 with gr.Box():
                     with gr.Row():
                         with gr.Column(scale=1, min_width=200):
                             novel_type = gr.Textbox(
-                                label="Novel Type", placeholder="e.g. science fiction")
+                                label="小说类型", placeholder="例如： 科幻")
                         with gr.Column(scale=2, min_width=400):
-                            description = gr.Textbox(label="Description")
+                            description = gr.Textbox(label="描述")
                 btn_init = gr.Button(
-                    "Init Novel Generation", variant="primary")
-                gr.Examples(["Science Fiction", "Romance", "Mystery", "Fantasy",
-                            "Historical", "Horror", "Thriller", "Western", "Young Adult", ], inputs=[novel_type])
+                    "小说初步生成", variant="primary")
+                gr.Examples(["科幻", "浪漫", "怪诞", "幻想",
+                             "历史小说", "恐怖", "惊悚", "西方", "青少年", ], inputs=[novel_type])
                 written_paras = gr.Textbox(
                     label="Written Paragraphs (editable)", max_lines=21, lines=21)
             with gr.Column():
@@ -224,8 +237,11 @@ with gr.Blocks(title="RecurrentGPT", css="footer {visibility: hidden}", theme="d
 
         btn_init.click(init, inputs=[novel_type, description], outputs=[
             short_memory, long_memory, written_paras, instruction1, instruction2, instruction3])
-        btn_step.click(step, inputs=[short_memory, long_memory, instruction1, instruction2, instruction3, written_paras], outputs=[
-            short_memory, long_memory, written_paras, selected_plan, instruction1, instruction2, instruction3])
+        btn_step.click(step,
+                       inputs=[short_memory, long_memory, instruction1, instruction2, instruction3, written_paras],
+                       outputs=[
+                           short_memory, long_memory, written_paras, selected_plan, instruction1, instruction2,
+                           instruction3])
 
     with gr.Tab("Human-in-the-Loop"):
         with gr.Row():
@@ -240,7 +256,7 @@ with gr.Blocks(title="RecurrentGPT", css="footer {visibility: hidden}", theme="d
                 btn_init = gr.Button(
                     "Init Novel Generation", variant="primary")
                 gr.Examples(["Science Fiction", "Romance", "Mystery", "Fantasy",
-                            "Historical", "Horror", "Thriller", "Western", "Young Adult", ], inputs=[novel_type])
+                             "Historical", "Horror", "Thriller", "Western", "Young Adult", ], inputs=[novel_type])
                 written_paras = gr.Textbox(
                     label="Written Paragraphs (editable)", max_lines=23, lines=23)
             with gr.Column():
@@ -261,8 +277,9 @@ with gr.Blocks(title="RecurrentGPT", css="footer {visibility: hidden}", theme="d
                             label="Instruction 3", max_lines=3, lines=3, interactive=False)
                     with gr.Row():
                         with gr.Column(scale=1, min_width=100):
-                            selected_plan = gr.Radio(["Instruction 1", "Instruction 2", "Instruction 3"], label="Instruction Selection",)
-                                                    #  info="Select the instruction you want to revise and use for the next step generation.")
+                            selected_plan = gr.Radio(["Instruction 1", "Instruction 2", "Instruction 3"],
+                                                     label="Instruction Selection", )
+                            #  info="Select the instruction you want to revise and use for the next step generation.")
                         with gr.Column(scale=3, min_width=300):
                             selected_instruction = gr.Textbox(
                                 label="Selected Instruction (editable)", max_lines=5, lines=5)
@@ -271,10 +288,11 @@ with gr.Blocks(title="RecurrentGPT", css="footer {visibility: hidden}", theme="d
 
         btn_init.click(init, inputs=[novel_type, description], outputs=[
             short_memory, long_memory, written_paras, instruction1, instruction2, instruction3])
-        btn_step.click(controled_step, inputs=[short_memory, long_memory, selected_instruction, written_paras], outputs=[
-            short_memory, long_memory, written_paras, instruction1, instruction2, instruction3])
+        btn_step.click(controled_step, inputs=[short_memory, long_memory, selected_instruction, written_paras],
+                       outputs=[
+                           short_memory, long_memory, written_paras, instruction1, instruction2, instruction3])
         selected_plan.select(on_select, inputs=[
-                             instruction1, instruction2, instruction3], outputs=[selected_instruction])
+            instruction1, instruction2, instruction3], outputs=[selected_instruction])
 
     demo.queue(concurrency_count=1)
 
